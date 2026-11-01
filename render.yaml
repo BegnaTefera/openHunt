@@ -1,0 +1,42 @@
+# The API runs on Render. Scheduled collection runs for free in GitHub Actions
+# (see .github/workflows/collect.yml), so no worker service is needed here.
+services:
+  - type: web
+    name: openhunt-api
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    healthCheckPath: /health
+    envVars:
+      - key: APP_NAME
+        value: openHunt
+      - key: APP_ENV
+        value: production
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: API_PORT
+        value: 8000
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 60
+      - key: JOB_FETCH_INTERVAL_MINUTES
+        value: 30
+      - key: MAX_JOBS_PER_RUN
+        value: 50
+      - key: REQUEST_TIMEOUT_SECONDS
+        value: 20
+      - key: REQUESTS_PER_MINUTE
+        value: 20
+      - key: USER_AGENT
+        value: openHunt/0.1 (+https://example.com; contact@example.com)
+      - key: API_TIMEOUT_SECONDS
+        value: 20
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: DEFAULT_USERNAME
+        sync: false
+      - key: DEFAULT_PASSWORD
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

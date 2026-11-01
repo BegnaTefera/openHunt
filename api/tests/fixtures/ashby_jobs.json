@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "id": "ashby-posting-456",
+      "title": "Senior Backend Engineer",
+      "location": "Remote - North America",
+      "secondaryLocations": [],
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "FullTime",
+      "isRemote": true,
+      "descriptionHtml": "<p>Build reliable APIs.</p>",
+      "descriptionPlain": "Build reliable APIs.",
+      "publishedAt": "2026-10-18T12:00:00.000Z",
+      "jobUrl": "https://jobs.ashbyhq.com/acme/ashby-posting-456",
+      "applyUrl": "https://jobs.ashbyhq.com/acme/ashby-posting-456/application",
+      "compensation": {
+        "compensationTierSummary": "$120K - $160K"
+      }
+    }
+  ]
+}

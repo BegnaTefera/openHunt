@@ -1,0 +1,1 @@
+"""openHunt backend package."""

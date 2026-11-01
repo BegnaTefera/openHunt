@@ -1,0 +1,23 @@
+{
+  "jobs": [
+    {
+      "id": 481203,
+      "title": "Backend Engineer",
+      "updated_at": "2026-10-20T14:20:00Z",
+      "location": {
+        "name": "Remote - United States"
+      },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/481203",
+      "content": "<p>Build services with Python.</p>",
+      "departments": [
+        {
+          "name": "Engineering"
+        }
+      ],
+      "offices": []
+    }
+  ],
+  "meta": {
+    "total": 1
+  }
+}

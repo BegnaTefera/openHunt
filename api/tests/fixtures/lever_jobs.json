@@ -1,0 +1,17 @@
+[
+  {
+    "id": "lever-posting-123",
+    "text": "Full Stack Developer",
+    "categories": {
+      "commitment": "Full-time",
+      "department": "Engineering",
+      "location": "Remote",
+      "team": "Product"
+    },
+    "hostedUrl": "https://jobs.lever.co/acme/lever-posting-123",
+    "applyUrl": "https://jobs.lever.co/acme/lever-posting-123/apply",
+    "description": "<p>Build TypeScript applications.</p>",
+    "descriptionPlain": "Build TypeScript applications.",
+    "createdAt": 1792500000000
+  }
+]
