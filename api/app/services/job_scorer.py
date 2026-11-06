@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
-_TARGET_TITLE_RE = re.compile(r"(?<![a-z])(?:full[\s-]*stack|back[\s-]*end)(?![a-z])", re.I)
+from app.services.roles import matches_roles
+
 _SENIORITY_RE = re.compile(r"\b(senior|staff|principal|lead)\b", re.I)
 _COUNTRY_LIMIT_RE = re.compile(
     r"\b(?:only\s+(?:applicants?|candidates?|employees?|residents?)\s+"
@@ -48,14 +51,18 @@ _AUTH_LIMIT_RE = re.compile(
 )
 
 
-def is_target_title(title: str) -> bool:
-    """True when a job title is a full-stack or backend role."""
-    return bool(_TARGET_TITLE_RE.search(title or ""))
+def _field(job: object, name: str, default: Any = None) -> Any:
+    """Read a job field whether the job is a dict (dashboard) or an object (parser, tests)."""
+    if isinstance(job, Mapping):
+        return job.get(name, default)
+    return getattr(job, name, default)
 
 
 @dataclass
 class Profile:
+    # Role family keys from app.services.roles. An empty list means every tech role.
     preferred_roles: list[str] = field(default_factory=lambda: ["backend", "full-stack"])
+    custom_title_keywords: list[str] = field(default_factory=list)
     tech_stack: set[str] = field(
         default_factory=lambda: {"python", "fastapi", "postgresql", "typescript", "react"}
     )
@@ -80,18 +87,18 @@ def _contains_configured_value(text: str, values: set[str]) -> bool:
 
 
 def _eligibility_reasons(job: object, profile: Profile) -> list[str]:
-    title = getattr(job, "title", "") or ""
-    description = getattr(job, "description", "") or ""
-    location = getattr(job, "location", "") or getattr(job, "location_text", "") or ""
+    title = _field(job, "title", "") or ""
+    description = _field(job, "description", "") or ""
+    location = _field(job, "location", "") or _field(job, "location_text", "") or ""
     text = f"{title}\n{location}\n{description}"
     reasons: list[str] = []
 
-    if not _TARGET_TITLE_RE.search(title):
-        reasons.append("excluded: title is not full-stack or backend")
+    if not matches_roles(title, profile.preferred_roles, profile.custom_title_keywords):
+        reasons.append("excluded: title does not match your selected role types")
 
     allowed_seniority = _normalized_values(profile.allowed_seniority)
     title_levels = {match.casefold() for match in _SENIORITY_RE.findall(title)}
-    job_seniority = (getattr(job, "seniority", None) or "").strip().casefold()
+    job_seniority = (_field(job, "seniority", None) or "").strip().casefold()
     if job_seniority in {"senior", "staff", "principal", "lead"}:
         title_levels.add(job_seniority)
     disallowed_levels = title_levels - allowed_seniority
@@ -150,20 +157,20 @@ def score_job(job: object, profile: Profile) -> tuple[int, list[str]]:
     if eligibility_reasons:
         return 0, eligibility_reasons
 
-    title = (getattr(job, "title", "") or "").lower()
-    description = (getattr(job, "description", "") or "").lower()
+    title = (_field(job, "title", "") or "").lower()
+    description = (_field(job, "description", "") or "").lower()
     location = (
-        getattr(job, "location", "")
-        or getattr(job, "location_text", "")
+        _field(job, "location", "")
+        or _field(job, "location_text", "")
         or ""
     ).lower()
-    remote = bool(getattr(job, "remote", False))
-    skills = {skill.lower() for skill in getattr(job, "skills", [])}
+    remote = bool(_field(job, "remote", False))
+    skills = {skill.lower() for skill in _field(job, "skills", [])}
 
     score = 0
     reasons: list[str] = []
 
-    if any(role.lower() in title for role in profile.preferred_roles):
+    if matches_roles(title, profile.preferred_roles, profile.custom_title_keywords):
         score += 35
         reasons.append("role match")
 
@@ -176,9 +183,9 @@ def score_job(job: object, profile: Profile) -> tuple[int, list[str]]:
         score += 15
         reasons.append("remote-friendly")
 
-    for term in ["api", "postgresql", "fastapi", "typescript", "react", "backend", "full-stack"]:
-        if term in description:
-            score += 2
+    # Small bonus for each of the user's own skills that the description mentions.
+    mentioned = [skill for skill in sorted(profile.tech_stack) if skill and skill in description]
+    score += min(10, 2 * len(mentioned))
 
     score = max(0, min(100, score))
     return score, reasons

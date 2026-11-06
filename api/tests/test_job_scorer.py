@@ -54,7 +54,34 @@ def test_stage_one_excludes_titles_outside_target_roles() -> None:
     score, reasons = score_job(job, Profile())
 
     assert score == 0
-    assert "excluded: title is not full-stack or backend" in reasons
+    assert "excluded: title does not match your selected role types" in reasons
+
+
+def test_every_tech_role_counts_when_no_role_types_are_selected() -> None:
+    frontend = SimpleNamespace(title="Frontend Engineer", description="React", location="Remote", skills=[])
+    devops = SimpleNamespace(title="DevOps Engineer", description="Kubernetes", location="Remote", skills=[])
+    sales = SimpleNamespace(title="Account Executive", description="Sell things", location="Remote", skills=[])
+
+    everything = Profile(preferred_roles=[])
+
+    assert score_job(frontend, everything)[0] > 0
+    assert score_job(devops, everything)[0] > 0
+    assert score_job(sales, everything)[0] == 0
+
+
+def test_custom_title_keywords_extend_the_match() -> None:
+    job = SimpleNamespace(title="Technical Recruiter", description="Hire engineers", location="Remote", skills=[])
+
+    assert score_job(job, Profile(preferred_roles=[]))[0] == 0
+    assert score_job(job, Profile(preferred_roles=[], custom_title_keywords=["recruiter"]))[0] > 0
+
+
+def test_skill_mentions_in_the_description_raise_the_score() -> None:
+    plain = SimpleNamespace(title="Backend Engineer", description="Build services", location="Remote", skills=[])
+    rich = SimpleNamespace(title="Backend Engineer", description="Build services in Rust and Kafka", location="Remote", skills=[])
+    profile = Profile(tech_stack={"rust", "kafka"})
+
+    assert score_job(rich, profile)[0] > score_job(plain, profile)[0]
 
 
 def test_stage_one_excludes_seniority_unless_profile_allows_it() -> None:
@@ -137,3 +164,19 @@ def test_stage_one_keeps_region_requirements_matching_profile() -> None:
 
     assert score > 0
     assert all(not reason.startswith("excluded:") for reason in reasons)
+
+
+def test_scoring_accepts_the_dictionaries_the_dashboard_builds() -> None:
+    """Regression: dict jobs used to look title-less, so every dashboard job scored 0."""
+    job = {
+        "title": "Backend Engineer",
+        "description": "Build FastAPI services",
+        "location_text": "Remote",
+        "seniority": None,
+        "skills": ["python"],
+    }
+
+    score, reasons = score_job(job, Profile(tech_stack={"python", "fastapi"}))
+
+    assert score >= 60
+    assert "role match" in reasons

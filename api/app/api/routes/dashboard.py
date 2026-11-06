@@ -4,7 +4,7 @@ from datetime import datetime, time, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -25,12 +25,14 @@ from app.schemas.dashboard import (
 )
 from app.services.job_scorer import Profile as ScoringProfile
 from app.services.job_scorer import score_job
+from app.services.notifications import enqueue_status_change
+from app.services.roles import catalog, split_role_values
 
 router = APIRouter(tags=["dashboard"])
 
 
-def _profile_record(db: Session) -> Profile | None:
-    return db.scalar(select(Profile).where(Profile.id == 1))
+def _profile_record(db: Session, user: User) -> Profile | None:
+    return db.scalar(select(Profile).where(Profile.user_id == user.id))
 
 
 def _profile_response(record: Profile | None) -> ProfileRead:
@@ -43,6 +45,7 @@ def _profile_response(record: Profile | None) -> ProfileRead:
         timezones=preferences.get("timezones", []),
         work_authorizations=preferences.get("work_authorizations", []),
         allowed_seniority=preferences.get("allowed_seniority", []),
+        custom_title_keywords=preferences.get("custom_title_keywords", []),
         full_name=preferences.get("full_name"),
         headline=preferences.get("headline"),
         summary=preferences.get("summary"),
@@ -53,10 +56,9 @@ def _profile_response(record: Profile | None) -> ProfileRead:
 def _scoring_profile(record: Profile | None) -> ScoringProfile:
     preferences = record.preferences if record else {}
     return ScoringProfile(
-        preferred_roles=record.target_roles or ["backend", "full-stack"] if record else [
-            "backend",
-            "full-stack",
-        ],
+        # An empty selection means "every tech role".
+        preferred_roles=list(record.target_roles) if record else [],
+        custom_title_keywords=list(preferences.get("custom_title_keywords", [])),
         tech_stack={skill.casefold() for skill in record.skills} if record else set(),
         allowed_seniority=set(preferences.get("allowed_seniority", [])),
         country=preferences.get("country"),
@@ -103,6 +105,16 @@ def _job_response(
     return JobDashboardRead(**values)
 
 
+def _user_application_join(user: User) -> Any:
+    return and_(Application.job_id == Job.id, Application.user_id == user.id)
+
+
+@router.get("/roles")
+def list_role_families(_user: User = Depends(get_current_user)) -> list[dict[str, str]]:
+    """The role types a user can choose from."""
+    return catalog()
+
+
 @router.get("/jobs", response_model=list[JobDashboardRead])
 def list_dashboard_jobs(
     source: str | None = None,
@@ -111,12 +123,12 @@ def list_dashboard_jobs(
     new_today: bool = False,
     status: ApplicationStatus | None = None,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> list[JobDashboardRead]:
     query = (
         select(Job, Company.name, Application.status)
         .outerjoin(Company, Job.company_id == Company.id)
-        .outerjoin(Application, Application.job_id == Job.id)
+        .outerjoin(Application, _user_application_join(user))
         .where(Job.is_active.is_(True))
     )
     if source:
@@ -132,7 +144,7 @@ def list_dashboard_jobs(
         query = query.where(Application.status == status)
 
     rows = db.execute(query).all()
-    profile = _scoring_profile(_profile_record(db))
+    profile = _scoring_profile(_profile_record(db, user))
     jobs = [
         _job_response(job, company_name, app_status or ApplicationStatus.NEW, profile)
         for job, company_name, app_status in rows
@@ -144,18 +156,18 @@ def list_dashboard_jobs(
 def get_dashboard_job(
     job_id: int,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> JobDetailRead:
     row = db.execute(
         select(Job, Company.name, Application.status)
         .outerjoin(Company, Job.company_id == Company.id)
-        .outerjoin(Application, Application.job_id == Job.id)
+        .outerjoin(Application, _user_application_join(user))
         .where(Job.id == job_id)
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
     job, company_name, status = row
-    profile = _scoring_profile(_profile_record(db))
+    profile = _scoring_profile(_profile_record(db, user))
     return _job_response(
         job,
         company_name,
@@ -170,19 +182,24 @@ def update_job_status(
     job_id: int,
     payload: ApplicationStatusUpdate,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> JobDashboardRead:
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    application = db.scalar(select(Application).where(Application.job_id == job.id))
+    application = db.scalar(
+        select(Application).where(Application.job_id == job.id, Application.user_id == user.id)
+    )
+    old_status = application.status if application else None
     if application is None:
-        application = Application(job_id=job.id, status=payload.status)
+        application = Application(job_id=job.id, user_id=user.id, status=payload.status)
         db.add(application)
     else:
         application.status = payload.status
     if payload.status == ApplicationStatus.APPLIED and application.applied_at is None:
         application.applied_at = datetime.now(timezone.utc)
+    company = db.scalar(select(Company.name).where(Company.id == job.company_id)) if job.company_id else None
+    enqueue_status_change(db, user.id, job, company, old_status, application.status)
     db.commit()
     db.refresh(application)
     return _job_response(
@@ -191,30 +208,38 @@ def update_job_status(
         if job.company_id is not None
         else None,
         application.status,
-        _scoring_profile(_profile_record(db)),
+        _scoring_profile(_profile_record(db, user)),
     )
 
 
 @router.get("/profile", response_model=ProfileRead)
 def read_profile(
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> ProfileRead:
-    return _profile_response(_profile_record(db))
+    return _profile_response(_profile_record(db, user))
 
 
 @router.put("/profile", response_model=ProfileRead)
 def update_profile(
     payload: ProfileUpdate,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> ProfileRead:
-    record = _profile_record(db)
+    record = _profile_record(db, user)
     if record is None:
-        record = Profile(id=1, skills=[], target_roles=[], preferences={})
+        record = Profile(user_id=user.id, skills=[], target_roles=[], preferences={})
         db.add(record)
+    # Known role keys are stored as the selection. Free text typed into older versions
+    # of the editor is kept as extra title keywords so it keeps working.
+    role_keys, legacy_text = split_role_values(payload.target_roles)
+    keywords: list[str] = []
+    for item in [*payload.custom_title_keywords, *legacy_text]:
+        cleaned = item.strip()[:60]
+        if cleaned and cleaned.casefold() not in {existing.casefold() for existing in keywords}:
+            keywords.append(cleaned)
     record.skills = payload.skills
-    record.target_roles = payload.target_roles
+    record.target_roles = role_keys
     record.seniority = payload.seniority
     preferences = dict(record.preferences or {})
     preferences.update(
@@ -222,6 +247,7 @@ def update_profile(
         timezones=payload.timezones,
         work_authorizations=payload.work_authorizations,
         allowed_seniority=payload.allowed_seniority,
+        custom_title_keywords=keywords,
     )
     # Drafting facts are only changed when the client sends them, so older clients
     # that do not know these fields cannot erase them.
@@ -239,7 +265,7 @@ def update_profile(
 @router.get("/stats", response_model=DashboardStats)
 def dashboard_stats(
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> DashboardStats:
     applied_count = func.sum(
         case(
@@ -269,7 +295,7 @@ def dashboard_stats(
             func.coalesce(replies_count, 0),
             func.coalesce(interviews_count, 0),
         )
-        .outerjoin(Application, Application.job_id == Job.id)
+        .outerjoin(Application, _user_application_join(user))
         .where(Job.is_active.is_(True))
         .group_by(Job.source)
         .order_by(Job.source)

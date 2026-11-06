@@ -21,6 +21,8 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.company import Company
 from app.models.event import Event
+from app.services.gmail import poll_gmail_replies
+from app.services.notifications import dispatch_telegram_notifications
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("openhunt.worker")
@@ -98,6 +100,27 @@ def collect_board_source(source: str) -> None:
                 logger.exception("Could not persist collector failure event for %s", source)
 
 
+def poll_gmail() -> None:
+    with SessionLocal() as db:
+        try:
+            found = poll_gmail_replies(db)
+            logger.info("Found %s new Gmail application replies", found)
+        except Exception:
+            db.rollback()
+            logger.exception("Gmail reply polling failed")
+
+
+def send_telegram_notifications() -> None:
+    with SessionLocal() as db:
+        try:
+            sent = dispatch_telegram_notifications(db)
+            if sent:
+                logger.info("Delivered %s Telegram notifications", sent)
+        except Exception:
+            db.rollback()
+            logger.exception("Telegram notification delivery failed")
+
+
 def main() -> None:
     scheduler = BlockingScheduler()
     scheduler.add_job(
@@ -110,6 +133,24 @@ def main() -> None:
     )
     logger.info("Worker is running scheduled public job-board collectors.")
     scheduler.add_job(collect_configured_companies, "date", id="initial-collector-run")
+    scheduler.add_job(
+        poll_gmail,
+        "interval",
+        minutes=settings.gmail_poll_interval_minutes,
+        id="poll-gmail-replies",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(poll_gmail, "date", id="initial-gmail-poll")
+    scheduler.add_job(
+        send_telegram_notifications,
+        "interval",
+        minutes=1,
+        id="deliver-telegram-notifications",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(send_telegram_notifications, "date", id="initial-telegram-delivery")
     for source in BOARD_COLLECTORS:
         scheduler.add_job(
             collect_board_source,

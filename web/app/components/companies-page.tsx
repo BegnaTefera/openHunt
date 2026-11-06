@@ -7,7 +7,7 @@ import { useAuth } from './app-shell';
 type ATS = Company['ats_type'];
 
 export default function CompaniesPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [name, setName] = useState('');
   const [atsType, setAtsType] = useState<ATS>('greenhouse');
@@ -67,6 +67,11 @@ export default function CompaniesPage() {
             {companies.length === 0 && <p className="empty-inline">No boards connected yet.</p>}
           </div>
         </section>
+        {!user.is_admin ? (
+          <section className="content-panel">
+            <div className="section-heading"><div><h2>Shared company list</h2><p className="muted">These boards are shared by everyone on this server and are managed by the admin. New boards are also found automatically by Discovery.</p></div></div>
+          </section>
+        ) : (
         <form className="content-panel company-add-form" onSubmit={addCompany}>
           <div className="section-heading"><div><h2>Add a company</h2><p className="muted">Connect a public ATS job board.</p></div></div>
           <label>Company name<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
@@ -82,6 +87,7 @@ export default function CompaniesPage() {
           {message && <p className="success-message" role="status">{message}</p>}
           <button className="button button-primary" disabled={busy}>{busy ? 'Adding…' : 'Add board'}</button>
         </form>
+        )}
       </div>
     </>
   );

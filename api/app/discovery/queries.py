@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.services.roles import search_phrases_for
+
 ATS_SEARCH_HOSTS = (
     "jobs.lever.co",
     "jobs.ashbyhq.com",
@@ -12,29 +14,15 @@ ATS_SEARCH_HOSTS = (
 _MODIFIERS = ("remote", "junior remote")
 
 
-def _role_phrases(role: str) -> list[str]:
-    normalized = role.casefold().replace("-", " ").strip()
-    if not normalized:
-        return []
-    if "full" in normalized:
-        return ["full stack engineer", "full stack developer"]
-    if "back" in normalized:
-        return ["backend engineer", "backend developer"]
-    return [normalized]
-
-
 def build_search_queries(target_roles: list[str] | None) -> list[str]:
     """Return one ``site:`` query per host, role phrase, and modifier.
 
-    One host per query keeps each query simple for any search engine, and the
-    caller rotates through the list so a small daily quota still covers all of it.
+    ``target_roles`` are role family keys (see ``app.services.roles``); an empty
+    list means every tech family. One host per query keeps each query simple for any
+    search engine, and the caller rotates through the list so a small daily quota
+    still covers all of it.
     """
-    roles = target_roles or ["backend", "full-stack"]
-    phrases: list[str] = []
-    for role in roles:
-        for phrase in _role_phrases(role):
-            if phrase not in phrases:
-                phrases.append(phrase)
+    phrases = search_phrases_for(target_roles)
     return [
         f'site:{host} "{phrase}" {modifier}'
         for phrase in phrases

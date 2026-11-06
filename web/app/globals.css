@@ -253,3 +253,55 @@ td { border-top: 1px solid #f0f1ee; color: #667164; font-size: 11px; padding: 12
 .draft-field { color: #5b6858; display: grid; font-size: 11px; gap: 6px; margin-top: 12px; }
 .draft-textarea { background: #fff; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); line-height: 1.5; min-height: 38px; padding: 10px; resize: vertical; width: 100%; }
 .warning-list { background: #fbf6e9; border: 1px solid #efe3bd; border-radius: 9px; color: #7a6320; font-size: 11px; line-height: 1.5; margin: 10px 0; padding: 10px 12px 10px 28px; }
+
+/* Accounts, onboarding and pickers */
+.auth-tabs { background: #f1f3ee; border-radius: 9px; display: grid; gap: 3px; grid-template-columns: 1fr 1fr; padding: 3px; }
+.auth-tab { background: transparent; border: 0; border-radius: 7px; color: #6e7a6b; cursor: pointer; font-size: 12px; font-weight: 600; padding: 9px; }
+.auth-tab.active { background: #fff; box-shadow: 0 1px 3px rgba(34, 49, 35, .12); color: var(--ink); }
+.onboarding-screen { background: radial-gradient(ellipse at 80% 10%, #eef3e9 0, transparent 35%), var(--canvas); display: flex; justify-content: center; min-height: 100vh; padding: 28px 16px; }
+.onboarding-card { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 25px 65px rgba(34, 49, 35, .09); display: grid; gap: 14px; max-width: 640px; padding: 32px; width: 100%; }
+.onboarding-card h1 { font-size: 26px; letter-spacing: -.03em; margin: 0; }
+.onboarding-card h2 { font-size: 17px; margin: 0 0 4px; }
+.onboarding-card .eyebrow, .onboarding-card .muted { margin: 0; }
+.onboarding-step { display: grid; gap: 13px; }
+.onboarding-actions { align-items: center; display: flex; justify-content: space-between; margin-top: 6px; }
+.step-dots { display: flex; flex-wrap: wrap; gap: 6px 14px; list-style: none; margin: 4px 0; padding: 0; }
+.step-dot { align-items: center; color: #9aa497; display: flex; font-size: 11px; gap: 6px; }
+.step-dot span { align-items: center; background: #eef0eb; border-radius: 50%; display: inline-flex; font-weight: 700; height: 20px; justify-content: center; width: 20px; }
+.step-dot.current { color: var(--ink); font-weight: 700; }
+.step-dot.current span { background: #486c50; color: #fff; }
+.step-dot.done span { background: #d9e6d8; color: #486c50; }
+.choice-row { align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; display: flex; gap: 10px; padding: 11px 12px; }
+.choice-row input { margin-top: 3px; min-height: 0; width: auto; }
+.choice-row span { display: grid; gap: 2px; }
+.choice-row small, .hint { color: #8b9588; font-size: 11px; font-weight: 400; line-height: 1.45; }
+.role-picker { display: grid; gap: 10px; }
+.role-grid { display: grid; gap: 7px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.role-option { align-items: center; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; display: flex; font-size: 12px; gap: 8px; padding: 9px 10px; }
+.role-option input { min-height: 0; width: auto; }
+.role-option.selected { background: #eef3ea; border-color: #95ad97; }
+.field-label { color: #788274; display: grid; font-size: 11px; font-weight: 600; gap: 7px; }
+.field-label select, .field-label input, .field-label textarea { background: #fff; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); min-height: 38px; padding: 9px 10px; width: 100%; }
+.checkbox-row { border: 1px solid var(--line); border-radius: 10px; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 10px 12px; }
+.checkbox-row legend { color: #788274; font-size: 11px; font-weight: 600; padding: 0 4px; }
+.checkbox-row label { align-items: center; display: flex; font-size: 12px; gap: 6px; }
+.checkbox-row input { min-height: 0; width: auto; }
+.checkbox-row small { flex-basis: 100%; }
+.file-drop { background: #f8faf6; border: 2px dashed #c9d4c6; border-radius: 12px; color: var(--ink); cursor: pointer; display: grid; gap: 4px; padding: 26px 14px; text-align: center; width: 100%; }
+.file-drop span { color: #8b9588; font-size: 11px; }
+.cv-panel { display: grid; gap: 10px; }
+.cv-summary { align-items: center; border: 1px solid var(--line); border-radius: 10px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; padding: 12px; }
+.cv-summary > div:first-child { display: grid; gap: 2px; }
+.cv-summary span { color: #8b9588; font-size: 11px; }
+.inline-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.danger-zone { border-color: #f0d2ce; }
+.button-danger { background: #b4453a; border-color: #b4453a; color: #fff; }
+.button-danger:disabled { opacity: .45; }
+.integration-panel { grid-column: 1 / -1; }
+.gmail-thread-list { display: grid; gap: 10px; margin-top: 20px; }
+.gmail-thread-row { align-items: center; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; padding-top: 12px; }
+.gmail-thread-row > div:first-child { display: grid; gap: 4px; min-width: 180px; }
+.gmail-thread-row strong { font-size: 12px; }
+.gmail-thread-row .small-note { margin: 0; }
+.gmail-track-controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+.gmail-track-controls select { background: #fff; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); min-height: 39px; max-width: 340px; padding: 0 10px; }

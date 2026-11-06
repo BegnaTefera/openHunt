@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.ai.client import AIUnavailableError, complete, complete_json
+from app.services.cv import redact_contact_details
 
 logger = logging.getLogger("openhunt.drafting")
 
@@ -47,9 +48,10 @@ class DraftProfile:
     skills: list[str] = field(default_factory=list)
     target_roles: list[str] = field(default_factory=list)
     projects: list[dict[str, str]] = field(default_factory=list)
+    cv_excerpt: str = ""
 
     def facts(self) -> dict[str, Any]:
-        return {
+        facts: dict[str, Any] = {
             "full_name": self.full_name,
             "headline": self.headline,
             "summary": self.summary,
@@ -57,6 +59,10 @@ class DraftProfile:
             "target_roles": self.target_roles,
             "projects": self.projects,
         }
+        if self.cv_excerpt:
+            # Emails and phone numbers never leave the server.
+            facts["cv_excerpt"] = redact_contact_details(self.cv_excerpt)[:4000]
+        return facts
 
 
 @dataclass
@@ -194,6 +200,8 @@ def ai_draft(
             ],
             max_tokens=700,
             temperature=0.4,
+            # The prompt can contain CV text, so only no-training providers may see it.
+            sensitive=True,
         )
     except AIUnavailableError as error:
         logger.info("AI drafting unavailable, using the template: %s", error)
@@ -222,6 +230,7 @@ def ai_draft(
                 },
             ],
             _Verification,
+            sensitive=True,
         )
         for claim in check.unsupported_claims[:5]:
             warnings.append(f"Check this claim, it is not in your profile: {claim}")

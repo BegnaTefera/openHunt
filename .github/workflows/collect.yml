@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       steps:
-        description: "discovery, companies, boards, or all"
+        description: "discovery, companies, boards, gmail, or all"
         default: "all"
 
 concurrency:
@@ -23,14 +23,20 @@ jobs:
       PYTHONPATH: api
       # Required secret: your Neon connection string.
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      # The collectors never use these two, but the shared settings class requires
-      # a value for them. They are placeholders, not real credentials.
-      SECRET_KEY: collector-job-placeholder
-      DEFAULT_PASSWORD: collector-job-placeholder
+      # Must match the API's key: Gmail refresh tokens are encrypted with it.
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
       USER_AGENT: ${{ vars.USER_AGENT || 'openHunt/0.1 (+https://github.com; personal job search)' }}
       # Optional: leave the secrets unset to skip a source.
-      BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+      SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+      SERPAPI_MONTHLY_CAP: 250
       SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+      GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+      GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+      GMAIL_REDIRECT_URI: ${{ secrets.GMAIL_REDIRECT_URI }}
+      WEB_APP_URL: ${{ vars.WEB_APP_URL }}
+      GMAIL_POLL_INTERVAL_MINUTES: 10
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
       - uses: actions/checkout@v4
 

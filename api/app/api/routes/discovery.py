@@ -40,9 +40,9 @@ def discovery_status(
     providers = [
         _provider_budget(
             db,
-            "brave",
-            bool(settings.brave_api_key),
-            Budget(daily=settings.brave_daily_cap, monthly=settings.brave_monthly_cap),
+            "serpapi",
+            bool(settings.serpapi_api_key),
+            Budget(monthly=settings.serpapi_monthly_cap),
         ),
         _provider_budget(
             db,

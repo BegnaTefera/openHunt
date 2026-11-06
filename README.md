@@ -1,6 +1,6 @@
 # openHunt
 
-A single-user job-search assistant. The current release includes public job-board collectors for Greenhouse, Lever, and Ashby; single-user login; and UI company setup. Workable links can be recognized, but collection is disabled because Workable's official jobs API requires an account token. Gmail integration and application drafting are not enabled yet. Nothing submits applications.
+A job-search assistant for remote tech roles of every kind. The current release includes public job-board collectors for Greenhouse, Lever, and Ashby; company discovery; accounts with onboarding and CV upload; per-user scoring and application drafts; Gmail reply tracking; Telegram alerts; and UI company setup. Workable links can be recognized, but collection is disabled because Workable's official jobs API requires an account token. Nothing sends application emails.
 
 ## Monorepo layout
 
@@ -13,7 +13,7 @@ A single-user job-search assistant. The current release includes public job-boar
 
 ## Local development with Docker Compose
 
-1. Copy `.env.example` to `.env` and replace `SECRET_KEY` and `DEFAULT_PASSWORD` with strong random values. Do not commit `.env`.
+1. Copy `.env.example` to `.env` and replace `SECRET_KEY` with a strong random value (32+ characters). Do not commit `.env`.
 2. Start the complete local stack:
 
    ```powershell
@@ -22,7 +22,7 @@ A single-user job-search assistant. The current release includes public job-boar
 
 3. Open the hello page at `http://localhost:3000`, the API health endpoint at `http://localhost:8000/health`, and API docs at `http://localhost:8000/docs`.
 
-The API container runs `alembic upgrade head` before starting FastAPI. The initial single-user account is created on first API startup; the database stores only its scrypt password hash. Compose uses local Postgres credentials from `.env` for development. The worker runs its configured-company collection immediately, then at
+The API container runs `alembic upgrade head` before starting FastAPI. Accounts are created through the sign-up screen (see Authentication); the database stores only Argon2id password hash. Compose uses local Postgres credentials from `.env` for development. The worker runs its configured-company collection immediately, then at
 `JOB_FETCH_INTERVAL_MINUTES`. Each enabled public-board collector also has an
 independent initial run and schedule.
 
@@ -69,9 +69,10 @@ The Alembic migration chain creates:
 - `applications` with the requested PostgreSQL status enum and one application per job
 - `documents` with JSONB answers
 - `emails` with a unique Gmail message ID and optional application link
+- `gmail_connections` with encrypted per-user OAuth tokens, `tracked_gmail_threads`, and a Telegram notification outbox
 - `events` for audit records
 - `profile`, constrained to one row
-- `users`, constrained to one login row and storing only a password hash
+- `users` (email, Argon2id password hash, admin and lockout state), `refresh_tokens` (hashed, rotating sessions), `profile` and `applications` per user, and `cv_documents`
 
 Apply or inspect migrations from `api/`:
 
@@ -86,8 +87,82 @@ migration refuses to discard or silently reassign those jobs.
 
 ## Authentication
 
-Set `DEFAULT_USERNAME`, `DEFAULT_PASSWORD`, and a high-entropy `SECRET_KEY` through environment variables. On first startup, the API hashes the configured password using scrypt and inserts the single user after migrations. Existing user records are not overwritten on later startup. Login is `POST /auth/login`; it returns a signed bearer token.
-The authenticated `GET /companies` and `POST /companies` endpoints power the company setup UI.
+Anyone allowed to sign up creates an account with an email and a password (10 to 128
+characters, not a common password). Passwords are hashed with Argon2id. Older scrypt hashes
+still work and are upgraded on the next login.
+
+- **Sessions:** logging in returns a short-lived access token (15 minutes) that the website
+  keeps only in memory, and sets a rotating refresh token in an `HttpOnly`, `SameSite=Strict`
+  cookie (30 days). Refresh tokens are stored hashed. Using an old token again after it was
+  rotated ends that whole session family, which limits the damage of a stolen cookie.
+- **Same-origin API:** the browser only talks to `/api` on the website's own address. Next.js
+  forwards it to the real API (`API_URL`, set when the frontend is built), so the cookie is
+  first-party and the API address is not exposed. CORS is not needed for the website.
+- **Lockout:** five wrong passwords lock an account for 15 minutes. Login errors never say
+  whether the email exists.
+- **Change password** signs out every other device. The Account page also has "sign out
+  everywhere" and "delete my account" (removes the profile, CV, drafts and applications).
+- **Who may sign up:** `SIGNUP_ENABLED` and `ALLOWED_SIGNUP_EMAILS` (see `.env.example`)
+  control account creation. Sign-ups never grant admin privileges, even when an email is on
+  the allowlist. Provision an admin explicitly from a trusted shell with
+  `python -m app.cli set-credentials you@example.com --admin` (from `api/`, with `DATABASE_URL`
+  pointing at the target database). This creates the account or resets its password and signs
+  out its existing sessions. Admins manage the shared company list; everyone else can read it.
+  Restrict sign-ups with `ALLOWED_SIGNUP_EMAILS` or close them with `SIGNUP_ENABLED=false`.
+- **Forgotten password:** there is no email reset, because that needs an email service. Run
+  `python -m app.cli set-credentials you@example.com` (from `api/`, with `DATABASE_URL` pointing
+  at your database). It creates the account or resets its password and signs it out everywhere.
+- **Upgrading an old single-user database:** migration 0005 keeps the old account as an admin
+  with the email `<old username>@legacy.invalid`. Run
+  `python -m app.cli set-credentials you@example.com --admin` to create or promote an account
+  with your real email.
+
+## Gmail reply tracking and Telegram alerts
+
+Gmail is optional and is connected by each user from **Account**. The app requests
+read-only Gmail metadata access; it does not read or store message bodies or send mail.
+After connecting, mark an application as applied, choose a recent sent Gmail thread, and
+link it to that application. Replies arriving after the link are checked by the worker,
+stored as message metadata, and move the application to `replied` unless it already has a
+later outcome (interview, rejection, or offer). Unlink a thread or disconnect Gmail from
+Account at any time. Gmail refresh tokens are encrypted at rest using `SECRET_KEY`; keep
+that key stable and identical on the API and worker.
+The always-on worker checks at `GMAIL_POLL_INTERVAL_MINUTES`; the GitHub Actions worker
+checks once per scheduled hourly run.
+
+To configure Gmail:
+
+1. Enable the Gmail API in Google Cloud and create a Web application OAuth client. Configure
+   the consent screen and add test users while the app is in testing.
+2. Register `GMAIL_REDIRECT_URI` as an authorized redirect URI. Locally it is
+   `http://localhost:8000/integrations/gmail/callback`; in production use your API's public
+   URL with `/integrations/gmail/callback`. The value must match exactly.
+3. Set `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_URI`, and `WEB_APP_URL`
+   for the API and worker. Google may require verification before external users can use
+   Gmail scopes beyond your configured test users.
+
+To enable Telegram, create a bot with BotFather, add it to the destination chat, and configure
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` on the API and worker. This is a shared destination:
+alerts from every account go to that chat. It receives application status changes, newly
+collected jobs matching each user's role preferences, and detected Gmail replies. Messages
+include job links and relevant titles/status, not Gmail subjects, email bodies, or account
+email addresses. Failed deliveries are retried by the worker.
+
+## Onboarding and CV
+
+After the first sign-up a four-step setup collects your CV, the kinds of roles you want, your
+level and where you can work, and facts for cover letters. The CV (PDF, `.docx` or text, up to
+3 MB) is read locally with no AI to prefill your name and skills, and the file is stored in
+Postgres for your account only. Scanned, image-only PDFs are not supported.
+
+## Role types
+
+Jobs are matched to role families instead of two fixed titles: backend, frontend, full-stack,
+general software engineering, mobile, DevOps/SRE/cloud, data, ML/AI, QA, security, design/UX,
+product and project management, engineering management, support and solutions, developer
+relations and technical writing, embedded, games, and web3 (`GET /roles`). An empty selection
+means every tech role; non-tech jobs such as sales or marketing are not matched. Extra
+job-title words can be added per user. Discovery searches for the union of what all users want.
 
 ## Dashboard
 
@@ -175,13 +250,15 @@ It prints one JSON result per URL with `ats_type` and `ats_slug`. Workable URLs 
 
 1. Connect the repository in Render and deploy the `render.yaml` Blueprint.
 2. Create a Neon Postgres database and set `DATABASE_URL` in Render. Neon's plain `postgresql://` URL works; it is converted to the `psycopg` driver automatically.
-3. Set strong `SECRET_KEY`, `DEFAULT_USERNAME`, and `DEFAULT_PASSWORD` values in the API service environment. Set `CORS_ORIGINS` to a JSON array containing the deployed Vercel origin, for example `["https://your-app.vercel.app"]`.
-4. Render builds the API from its Dockerfile. The API applies Alembic migrations before serving traffic; `/health` is its health check.
+3. Set a strong `SECRET_KEY` and, if restricting registrations, `ALLOWED_SIGNUP_EMAILS` in the API service environment. Add `SERPAPI_API_KEY` to show the provider as configured in Discovery. `CORS_ORIGINS` is not needed because the website calls the API through its own `/api` proxy.
+4. For Gmail and Telegram, set `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_URI`, `WEB_APP_URL`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID` on the API service. `GMAIL_REDIRECT_URI` must use the public Render API URL and match the Google OAuth client exactly.
+5. Provision your administrator from a trusted machine with `DATABASE_URL` set to the Render database URL: from `api/`, run `python -m app.cli set-credentials you@example.com --admin` and enter a strong password when prompted. The command creates the account or resets its password and signs out its existing sessions. Set `SIGNUP_ENABLED=false` in Render after setup if you do not need more registrations.
+6. Render builds the API from its Dockerfile. The API applies Alembic migrations before serving traffic; `/health` is its health check.
 
 ### Vercel frontend
 
 1. Import the repository in Vercel and set the project root directory to `web`.
-2. Set `NEXT_PUBLIC_API_URL` to the deployed Render API URL.
+2. Set `API_URL` to the deployed Render API URL (no trailing slash). It is read at build time, so redeploy after changing it.
 3. Deploy using the Next.js framework preset and the included `web/vercel.json`.
 
 ### Free scheduled collection (GitHub Actions)
@@ -192,13 +269,19 @@ collects every configured ATS board, then collects the public boards. Setup:
 
 1. Push the repository to GitHub.
 2. Under Settings, Secrets and variables, Actions, add the secret `DATABASE_URL` (your Neon URL).
-3. Optional secrets: `BRAVE_API_KEY`, `SERPER_API_KEY`. Optional variable: `USER_AGENT`.
+3. Add `SECRET_KEY` (the same value as Render, used to decrypt Gmail tokens) and
+   `SERPAPI_API_KEY`. The SerpApi monthly cap defaults to 250 searches and counts failed
+   attempts too. Optional secrets: `SERPER_API_KEY`, `GMAIL_CLIENT_ID`,
+   `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_URI`, `TELEGRAM_BOT_TOKEN`, and
+   `TELEGRAM_CHAT_ID`. Optional variables: `WEB_APP_URL` and `USER_AGENT`.
 4. Open the Actions tab, choose "Collect jobs", and press "Run workflow" to test it.
+   The action needs the same `SECRET_KEY`, Gmail credentials, and Telegram bot/chat values
+   as the API to poll connected inboxes and deliver queued alerts.
 
 GitHub may delay scheduled runs by several minutes, and it disables scheduled workflows in
 repositories with no activity for about 60 days; re-enable it from the Actions tab if that
 happens. Check GitHub's current free-minute limits for your repository type. Run steps
-locally with `python -m worker.run_once discovery|companies|boards|all` (from the repository
+locally with `python -m worker.run_once discovery|companies|boards|gmail|all` (from the repository
 root with `PYTHONPATH=api`).
 
 ## Company discovery
@@ -208,10 +291,11 @@ one backend or full-stack title. It uses these free sources, each optional:
 
 - **Common Crawl** public URL index. No key. Each run queries one slug-prefix slice per host
   (a-z, 0-9, rotating) so successive runs explore different companies.
-- **Brave Search API** and **Serper**, with Google-style queries such as
+- **SerpApi** and optional **Serper**, with Google-style queries such as
   `site:jobs.lever.co "backend engineer" remote`. Each provider has a daily, monthly, or total
-  cap stored in Postgres, so a run stops before the free quota is used up. Attempts are counted
-  even when they fail. Set the keys and caps in `.env`; free-tier terms change, so confirm them.
+  cap stored in Postgres, so a run stops before the free quota is used up. SerpApi is capped at
+  250 searches per month by default; attempts count against the cap even when they fail. Set
+  `SERPAPI_API_KEY` and, optionally, `SERPER_API_KEY` in `.env`.
 
 Candidates are validated by calling the board's public jobs API once. Dead boards and boards
 with no matching roles are remembered and retried after 90 and 30 days. Network errors are not

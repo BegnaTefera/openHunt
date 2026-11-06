@@ -11,18 +11,20 @@ from app.core.auth import get_current_user
 from app.db.dependencies import get_db
 from app.models.application import Application, ApplicationStatus
 from app.models.company import Company
+from app.models.cv import CvDocument
 from app.models.document import Document
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.user import User
 from app.schemas.draft import DraftRead, DraftUpdate
+from app.services.notifications import enqueue_status_change
 
 router = APIRouter(tags=["drafts"])
 
 
-def _draft_profile(record: Profile | None) -> DraftProfile:
+def _draft_profile(record: Profile | None, cv_text: str = "") -> DraftProfile:
     if record is None:
-        return DraftProfile()
+        return DraftProfile(cv_excerpt=cv_text)
     preferences: dict[str, Any] = record.preferences or {}
     projects = [
         {
@@ -40,6 +42,7 @@ def _draft_profile(record: Profile | None) -> DraftProfile:
         skills=list(record.skills or []),
         target_roles=list(record.target_roles or []),
         projects=projects,
+        cv_excerpt=cv_text,
     )
 
 
@@ -51,10 +54,16 @@ def _job_and_company(db: Session, job_id: int) -> tuple[Job, str | None]:
     return job, company.name if company else None
 
 
-def _application(db: Session, job: Job) -> Application:
-    application = db.scalar(select(Application).where(Application.job_id == job.id))
+def _find_application(db: Session, job: Job, user: User) -> Application | None:
+    return db.scalar(
+        select(Application).where(Application.job_id == job.id, Application.user_id == user.id)
+    )
+
+
+def _application(db: Session, job: Job, user: User) -> Application:
+    application = _find_application(db, job, user)
     if application is None:
-        application = Application(job_id=job.id, status=ApplicationStatus.NEW)
+        application = Application(job_id=job.id, user_id=user.id, status=ApplicationStatus.NEW)
         db.add(application)
         db.flush()
     return application
@@ -88,10 +97,10 @@ def _store(document: Document, draft: Draft) -> None:
 def get_draft(
     job_id: int,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> DraftRead:
     job, _company = _job_and_company(db, job_id)
-    application = db.scalar(select(Application).where(Application.job_id == job.id))
+    application = _find_application(db, job, user)
     document = _document(db, application) if application else None
     if document is None:
         raise HTTPException(status_code=404, detail="No draft yet for this job")
@@ -103,15 +112,28 @@ def create_draft(
     job_id: int,
     use_ai: bool = True,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> DraftRead:
     job, company_name = _job_and_company(db, job_id)
-    profile = _draft_profile(db.scalar(select(Profile).where(Profile.id == 1)))
+    cv_text = db.scalar(select(CvDocument.extracted_text).where(CvDocument.user_id == user.id)) or ""
+    profile = _draft_profile(
+        db.scalar(select(Profile).where(Profile.user_id == user.id)), cv_text
+    )
     draft = generate_draft(db, job.title, company_name, job.description, profile, use_ai=use_ai)
 
-    application = _application(db, job)
+    application = _application(db, job, user)
+    old_status = application.status
     if application.status in (ApplicationStatus.NEW, ApplicationStatus.SHORTLISTED):
         application.status = ApplicationStatus.DRAFTED
+    company = db.get(Company, job.company_id) if job.company_id is not None else None
+    enqueue_status_change(
+        db,
+        user.id,
+        job,
+        company.name if company else None,
+        old_status,
+        application.status,
+    )
     document = _document(db, application)
     if document is None:
         document = Document(application_id=application.id, answers={})
@@ -127,10 +149,10 @@ def save_draft(
     job_id: int,
     payload: DraftUpdate,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> DraftRead:
     job, _company = _job_and_company(db, job_id)
-    application = _application(db, job)
+    application = _application(db, job, user)
     document = _document(db, application)
     if document is None:
         document = Document(application_id=application.id, answers={})

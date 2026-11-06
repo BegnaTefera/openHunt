@@ -3,7 +3,6 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
@@ -27,9 +26,16 @@ def get_current_user(
     try:
         claims = decode_access_token(credentials.credentials)
         user_id = int(claims["sub"])
+        token_version = int(claims.get("ver", 0))
     except (InvalidTokenError, KeyError, TypeError, ValueError):
         raise unauthorized from None
-    user = db.scalar(select(User).where(User.id == user_id))
-    if user is None:
+    user = db.get(User, user_id)
+    if user is None or not user.is_active or user.token_version != token_version:
         raise unauthorized
+    return user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user

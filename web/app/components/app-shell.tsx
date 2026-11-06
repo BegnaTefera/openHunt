@@ -1,12 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { FormEvent, ReactNode, createContext, useContext, useEffect, useState } from 'react';
-import { login } from '../../lib/api';
+import { usePathname, useRouter } from 'next/navigation';
+import { ReactNode, createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { AuthSession, User, logOut, refreshSession, subscribeToSession } from '../../lib/api';
+import AuthScreen from './auth-screen';
 
 type AuthContextValue = {
+  // The real access token is kept in memory by lib/api; this stays constant on purpose so
+  // pages do not reload their data every time the session quietly renews.
   token: string;
+  user: User;
+  setUser: (user: User) => void;
+  signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -24,80 +30,78 @@ const navigation = [
   { href: '/profile', label: 'Profile' },
   { href: '/companies', label: 'Companies' },
   { href: '/discovery', label: 'Discovery' },
+  { href: '/account', label: 'Account' },
 ];
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [token, setToken] = useState('');
-  const [ready, setReady] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const router = useRouter();
+  const [phase, setPhase] = useState<'loading' | 'out' | 'in'>('loading');
+  const [user, setUser] = useState<User | null>(null);
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
-    setToken(window.localStorage.getItem('openhunt-token') ?? '');
-    setReady(true);
+    const timer = window.setTimeout(() => setSlow(true), 4000);
+    refreshSession().then((session) => {
+      if (session) {
+        setUser(session.user);
+        setPhase('in');
+      } else {
+        setPhase('out');
+      }
+    });
+    const unsubscribe = subscribeToSession((next) => {
+      if (!next) {
+        setUser(null);
+        setPhase('out');
+      }
+    });
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    try {
-      const accessToken = await login(username, password);
-      window.localStorage.setItem('openhunt-token', accessToken);
-      setToken(accessToken);
-      setPassword('');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not sign in.');
-    } finally {
-      setBusy(false);
-    }
+  const needsOnboarding = phase === 'in' && user !== null && !user.onboarding_completed && pathname !== '/onboarding';
+
+  useEffect(() => {
+    if (needsOnboarding) router.replace('/onboarding');
+  }, [needsOnboarding, router]);
+
+  const signOut = useCallback(async () => {
+    await logOut();
+    setUser(null);
+    setPhase('out');
+    router.replace('/');
+  }, [router]);
+
+  function handleSignedIn(session: AuthSession) {
+    setUser(session.user);
+    setPhase('in');
   }
 
-  function signOut() {
-    window.localStorage.removeItem('openhunt-token');
-    setToken('');
-  }
-
-  if (!ready) {
-    return <main className="loading-screen">Loading openHunt…</main>;
-  }
-
-  if (!token) {
+  if (phase === 'loading' || needsOnboarding) {
     return (
-      <main className="auth-screen">
-        <form className="auth-card" onSubmit={handleLogin}>
-          <div className="brand-mark">oh</div>
-          <p className="eyebrow">Your focused job search</p>
-          <h1>Welcome back.</h1>
-          <p className="muted">Sign in to review your matched opportunities.</p>
-          <label>
-            Username
-            <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required />
-          </label>
-          <label>
-            Password
-            <input
-              autoComplete="current-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {error && <p className="error-message" role="alert">{error}</p>}
-          <button className="button button-primary" disabled={busy}>
-            {busy ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
+      <main className="loading-screen">
+        <div>Loading openHunt…{slow && <p className="muted small-note">Waking up the free server. This can take up to a minute.</p>}</div>
       </main>
     );
   }
 
+  if (phase === 'out' || !user) return <AuthScreen onSignedIn={handleSignedIn} />;
+
+  const context: AuthContextValue = { token: 'session', user, setUser, signOut };
+
+  if (pathname === '/onboarding') {
+    return (
+      <AuthContext.Provider value={context}>
+        <main className="onboarding-screen">{children}</main>
+      </AuthContext.Provider>
+    );
+  }
+
   return (
-    <AuthContext.Provider value={{ token }}>
+    <AuthContext.Provider value={context}>
       <div className="app-frame">
         <aside className="sidebar">
           <Link className="brand" href="/">
@@ -119,15 +123,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </nav>
           <div className="sidebar-bottom">
             <span className="online-dot" /> Collectors running
-            <button className="sign-out" onClick={signOut}>Sign out</button>
+            <button className="sign-out" onClick={() => void signOut()}>Sign out</button>
           </div>
         </aside>
         <main className="main-area">
           <header className="topbar">
             <div className="mobile-brand"><span className="brand-mark">oh</span> openHunt</div>
             <div className="topbar-note">Your next move, made clearer.</div>
-            <button className="topbar-signout" onClick={signOut}>Sign out</button>
-            <div className="avatar" aria-label="Account">Y</div>
+            <button className="topbar-signout" onClick={() => void signOut()}>Sign out</button>
+            <Link className="avatar" href="/account" aria-label={`Account: ${user.email}`}>{user.email.slice(0, 1).toUpperCase()}</Link>
           </header>
           <div className="page-content">{children}</div>
         </main>

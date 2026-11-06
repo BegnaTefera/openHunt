@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_admin
 from app.db.dependencies import get_db
 from app.models.company import Company
 from app.models.user import User
@@ -25,7 +25,7 @@ def list_companies(
 @router.post("", response_model=CompanyRead, status_code=status.HTTP_201_CREATED)
 def create_company(
     payload: CompanyCreate,
-    _user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> Company:
     company = Company(**payload.model_dump())

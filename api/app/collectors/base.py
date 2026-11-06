@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.company import Company
 from app.models.job import Job
+from app.services.notifications import enqueue_new_matching_jobs
 from app.services.robots import can_fetch_url, rate_limiter
 from app.collectors.url_detection import detect_ats_from_url
 
@@ -182,6 +183,7 @@ def sync_company_jobs(
         for job in db.scalars(select(Job).where(Job.company_id == company.id)).all()
     }
     new_count = 0
+    new_jobs: list[Job] = []
 
     for normalized in snapshot:
         row = existing.get(normalized.url)
@@ -210,7 +212,9 @@ def sync_company_jobs(
                     f"job URL is already assigned to a different company: {normalized.url}"
                 )
         if row is None:
-            db.add(Job(**values))
+            row = Job(**values)
+            db.add(row)
+            new_jobs.append(row)
             new_count += 1
         else:
             for field, value in values.items():
@@ -222,6 +226,7 @@ def sync_company_jobs(
             row.is_active = False
 
     db.flush()
+    enqueue_new_matching_jobs(db, new_jobs)
     return new_count
 
 
@@ -239,6 +244,7 @@ def sync_board_jobs(
         for job in db.scalars(select(Job).where(Job.source == source)).all()
     }
     new_count = 0
+    new_jobs: list[Job] = []
 
     for normalized in snapshot:
         raw_apply_url = normalized.raw_payload.get("apply_url")
@@ -282,7 +288,9 @@ def sync_board_jobs(
                     f"job URL is already assigned to a different source: {normalized.url}"
                 )
         if row is None:
-            db.add(Job(**values))
+            row = Job(**values)
+            db.add(row)
+            new_jobs.append(row)
             new_count += 1
         else:
             for field, value in values.items():
@@ -295,4 +303,5 @@ def sync_board_jobs(
                 row.is_active = False
 
     db.flush()
+    enqueue_new_matching_jobs(db, new_jobs)
     return new_count

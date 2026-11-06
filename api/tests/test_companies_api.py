@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_admin
 from app.db.dependencies import get_db
 from app.main import app
 from app.models.company import Company
@@ -43,11 +43,12 @@ def test_company_setup_requires_login_and_supports_add_and_list() -> None:
         unauthenticated = client.get("/companies")
         assert unauthenticated.status_code == 401
 
-        app.dependency_overrides[get_current_user] = lambda: User(
-            id=1,
-            username="admin",
-            password_hash="unused",
+        admin = User(
+            id=1, email="admin@example.com", password_hash="unused", is_admin=True,
+            is_active=True, onboarding_completed=True, token_version=0,
         )
+        app.dependency_overrides[get_current_user] = lambda: admin
+        app.dependency_overrides[require_admin] = lambda: admin
 
         created = client.post(
             "/companies",

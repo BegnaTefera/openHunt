@@ -10,55 +10,20 @@ schema. Example (PowerShell, using the Compose database):
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
 
 TEST_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not TEST_URL, reason="set TEST_DATABASE_URL to run")
 
-API_DIR = Path(__file__).resolve().parents[1]
 
-
-def alembic(*args: str) -> None:
-    env = {**os.environ, "DATABASE_URL": TEST_URL or ""}
-    subprocess.run(
-        [sys.executable, "-m", "alembic", *args], cwd=API_DIR, env=env, check=True, capture_output=True
-    )
-
-
-@pytest.fixture(scope="module")
-def engine():
-    engine = create_engine(TEST_URL or "")
-    with engine.begin() as connection:
-        connection.execute(text("DROP SCHEMA public CASCADE"))
-        connection.execute(text("CREATE SCHEMA public"))
-    alembic("upgrade", "head")
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture()
-def db(engine) -> Session:
-    with sessionmaker(bind=engine)() as session:
-        yield session
-        session.rollback()
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "TRUNCATE api_usage, discovery_candidates, documents, applications, jobs, "
-                "companies, events, profile RESTART IDENTITY CASCADE"
-            )
-        )
-
-
-def test_migration_0004_downgrades_and_upgrades_cleanly(engine) -> None:
+def test_migrations_downgrade_and_upgrade_cleanly(engine, alembic_cmd) -> None:
+    alembic = alembic_cmd
     alembic("downgrade", "0003_unmatched_board_jobs")
     with engine.connect() as connection:
         tables = {row[0] for row in connection.execute(text(
@@ -71,17 +36,27 @@ def test_usage_budgets_count_per_day_month_and_total(db: Session) -> None:
     from app.services.usage import Budget, get_usage, record_usage, remaining
 
     today = datetime(2026, 10, 31).date()
-    record_usage(db, "brave", 3, today=today)
-    record_usage(db, "brave", 2, today=today)
-    record_usage(db, "brave", 5, today=today - timedelta(days=5))  # same month
-    record_usage(db, "brave", 7, today=today - timedelta(days=40))  # older month
+    record_usage(db, "serpapi", 3, today=today)
+    record_usage(db, "serpapi", 2, today=today)
+    record_usage(db, "serpapi", 5, today=today - timedelta(days=5))  # same month
+    record_usage(db, "serpapi", 7, today=today - timedelta(days=40))  # older month
 
-    usage = get_usage(db, "brave", today)
+    usage = get_usage(db, "serpapi", today)
     assert (usage.day, usage.month, usage.total) == (5, 10, 17)
-    assert remaining(db, "brave", Budget(daily=20, monthly=12), today) == 2
-    assert remaining(db, "brave", Budget(daily=20, total=17), today) == 0
+    assert remaining(db, "serpapi", Budget(monthly=250), today) == 240
+    assert remaining(db, "serpapi", Budget(daily=20, monthly=12), today) == 2
+    assert remaining(db, "serpapi", Budget(daily=20, total=17), today) == 0
     assert remaining(db, "other", Budget(daily=4), today) == 4
-    assert remaining(db, "brave", Budget(), today) > 1_000_000
+    assert remaining(db, "serpapi", Budget(), today) > 1_000_000
+
+
+def test_serpapi_monthly_budget_is_reserved_atomically(db: Session) -> None:
+    from app.services.usage import Budget, get_usage, reserve_request
+
+    for _ in range(3):
+        assert reserve_request(db, "serpapi", Budget(monthly=3))
+    assert not reserve_request(db, "serpapi", Budget(monthly=3))
+    assert get_usage(db, "serpapi").month == 3
 
 
 class FakeSource:
@@ -103,8 +78,8 @@ def test_discovery_adds_matching_boards_and_remembers_the_rest(db: Session) -> N
     db.commit()
 
     outcomes = {
-        "good-co": BoardCheck("ok", "2 of 9 jobs are backend/full-stack"),
-        "sales-only": BoardCheck("no_match", "no matching backend/full-stack roles"),
+        "good-co": BoardCheck("ok", "2 of 9 jobs are tech roles"),
+        "sales-only": BoardCheck("no_match", "no matching tech roles"),
         "gone": BoardCheck("dead", "board not found"),
         "flaky": BoardCheck("transient", "timeout"),
     }
@@ -126,7 +101,7 @@ def test_discovery_adds_matching_boards_and_remembers_the_rest(db: Session) -> N
     rows = {row.ats_slug: row for row in db.scalars(select(DiscoveryCandidate)).all()}
     assert set(rows) == {"good-co", "sales-only", "gone"}  # transient errors are not remembered
     assert rows["good-co"].status == "added" and rows["good-co"].company_id is not None
-    assert rows["sales-only"].reason == "no matching backend/full-stack roles"
+    assert rows["sales-only"].reason == "no matching tech roles"
 
     # Second run: nothing is re-validated until the retry window passes.
     checked.clear()
@@ -134,7 +109,7 @@ def test_discovery_adds_matching_boards_and_remembers_the_rest(db: Session) -> N
     assert checked == ["flaky"] and second.added == 0
 
     # After 31 days a "no matching roles" board is checked again, and may now qualify.
-    outcomes["sales-only"] = BoardCheck("ok", "1 of 3 jobs are backend/full-stack")
+    outcomes["sales-only"] = BoardCheck("ok", "1 of 3 jobs are tech roles")
     checked.clear()
     later = run_discovery(db, [source], validator=validator, now=datetime.now(timezone.utc) + timedelta(days=31))
     assert "sales-only" in checked and "good-co" not in checked
@@ -146,7 +121,7 @@ def test_discovery_adds_matching_boards_and_remembers_the_rest(db: Session) -> N
 def test_discovery_respects_the_validation_limit(db: Session) -> None:
     from app.discovery.service import BoardCheck, run_discovery
 
-    source = FakeSource("brave", [f"https://jobs.ashbyhq.com/co{i}/x" for i in range(5)])
+    source = FakeSource("serpapi", [f"https://jobs.ashbyhq.com/co{i}/x" for i in range(5)])
     report = run_discovery(
         db, [source], max_validations=2, validator=lambda *_: BoardCheck("ok", "match")
     )
@@ -160,7 +135,7 @@ def test_search_source_stops_when_the_free_budget_is_used_up(db: Session) -> Non
     from app.services.usage import Budget, get_usage
 
     class Provider:
-        name = "brave"
+        name = "serpapi"
 
         def __init__(self) -> None:
             self.queries: list[str] = []
@@ -168,34 +143,40 @@ def test_search_source_stops_when_the_free_budget_is_used_up(db: Session) -> Non
         def search(self, query: str) -> list[str]:
             self.queries.append(query)
             if len(self.queries) == 2:
-                raise QuotaExhaustedError("brave rate limit or quota reached (HTTP 429)")
+                raise QuotaExhaustedError("SerpApi rate limit or quota reached (HTTP 429)")
             return [f"https://jobs.lever.co/slug{len(self.queries)}/1"]
 
     provider = Provider()
     queries = [f"q{i}" for i in range(10)]
-    source = SearchSource(provider, Budget(daily=3), queries, max_queries=5)  # type: ignore[arg-type]
+    source = SearchSource(provider, Budget(monthly=3), queries, max_queries=5)  # type: ignore[arg-type]
 
     urls = source.fetch_urls(db)
     assert provider.queries == ["q0", "q1"] and urls == ["https://jobs.lever.co/slug1/1"]
-    assert get_usage(db, "brave").day == 2  # attempts are counted, including the rejected one
+    assert get_usage(db, "serpapi").day == 2  # attempts are counted, including the rejected one
     assert source.errors and "429" in source.errors[0]
 
     provider.queries.clear()
-    source2 = SearchSource(provider, Budget(daily=3), queries, max_queries=5)  # type: ignore[arg-type]
+    source2 = SearchSource(provider, Budget(monthly=3), queries, max_queries=5)  # type: ignore[arg-type]
     source2.fetch_urls(db)
-    assert provider.queries == ["q2"]  # only one request of the daily budget remained
+    assert provider.queries == ["q2"]  # only one request of the monthly budget remained
     assert source2.fetch_urls(db) == [] and "budget used up" in source2.errors[-1]
 
 
 @pytest.fixture()
-def client(db: Session):
+def user(db: Session):
+    from app.services.accounts import create_user
+
+    return create_user(db, "ada@example.com", "a-long-test-password", check_signup_rules=False)
+
+
+@pytest.fixture()
+def client(db: Session, user):
     from app.core.auth import get_current_user
     from app.db.dependencies import get_db
     from app.main import app
-    from app.models.user import User
 
     app.dependency_overrides[get_db] = lambda: db
-    app.dependency_overrides[get_current_user] = lambda: User(id=1, username="admin", password_hash="x")
+    app.dependency_overrides[get_current_user] = lambda: user
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -255,13 +236,39 @@ def test_drafting_does_not_downgrade_a_later_status(client: TestClient, db: Sess
     assert client.get(f"/jobs/{job.id}").json()["status"] == "applied"
 
 
+def test_gmail_message_ids_are_unique_per_account(db: Session, user) -> None:
+    from app.models.email import Email
+    from app.services.accounts import create_user
+
+    other = create_user(db, "grace@example.com", "another-strong-test-password", check_signup_rules=False)
+    received_at = datetime.now(timezone.utc)
+    db.add_all(
+        [
+            Email(
+                gmail_message_id="same-gmail-message-id",
+                user_id=user.id,
+                from_address="recruiter@example.com",
+                received_at=received_at,
+            ),
+            Email(
+                gmail_message_id="same-gmail-message-id",
+                user_id=other.id,
+                from_address="recruiter@example.com",
+                received_at=received_at,
+            ),
+        ]
+    )
+    db.commit()
+    assert db.query(Email).filter(Email.gmail_message_id == "same-gmail-message-id").count() == 2
+
+
 def test_discovery_status_endpoint(client: TestClient, db: Session) -> None:
     from app.discovery.service import BoardCheck, run_discovery
 
     run_discovery(
         db,
-        [FakeSource("brave", ["https://jobs.lever.co/zed/1"])],
-        validator=lambda *_: BoardCheck("ok", "1 of 1 jobs are backend/full-stack"),
+        [FakeSource("serpapi", ["https://jobs.lever.co/zed/1"])],
+        validator=lambda *_: BoardCheck("ok", "1 of 1 jobs are tech roles"),
     )
 
     body = client.get("/discovery").json()
@@ -269,4 +276,4 @@ def test_discovery_status_endpoint(client: TestClient, db: Session) -> None:
     assert body["added_total"] == 1 and body["rejected_total"] == 0
     assert body["recent_candidates"][0]["ats_slug"] == "zed"
     assert body["last_run"]["added"] == 1
-    assert {item["name"] for item in body["providers"]} == {"brave", "serper", "commoncrawl"}
+    assert {item["name"] for item in body["providers"]} == {"serpapi", "serper", "commoncrawl"}

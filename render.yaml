@@ -4,6 +4,8 @@ services:
   - type: web
     name: openhunt-api
     runtime: docker
+    # Render's default plan is the paid Starter tier, so the free plan must be explicit.
+    plan: free
     dockerfilePath: ./api/Dockerfile
     dockerContext: ./api
     healthCheckPath: /health
@@ -17,7 +19,7 @@ services:
       - key: API_PORT
         value: 8000
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        value: 60
+        value: 15
       - key: JOB_FETCH_INTERVAL_MINUTES
         value: 30
       - key: MAX_JOBS_PER_RUN
@@ -34,9 +36,26 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
-      - key: DEFAULT_USERNAME
+      - key: SERPAPI_API_KEY
         sync: false
-      - key: DEFAULT_PASSWORD
+      - key: SERPAPI_MONTHLY_CAP
+        value: 250
+      - key: SERPER_API_KEY
         sync: false
-      - key: CORS_ORIGINS
+      # Comma-separated emails allowed to create an account (include your own).
+      - key: ALLOWED_SIGNUP_EMAILS
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REDIRECT_URI
+        sync: false
+      - key: GMAIL_POLL_INTERVAL_MINUTES
+        value: 10
+      - key: WEB_APP_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
         sync: false

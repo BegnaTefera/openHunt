@@ -40,13 +40,16 @@ class ProfileProject(BaseModel):
 
 
 class ProfileRead(BaseModel):
-    skills: list[str]
-    target_roles: list[str]
-    seniority: str | None
+    skills: list[str] = Field(default_factory=list, max_length=100)
+    # Role family keys (see GET /roles). An empty list means every tech role.
+    target_roles: list[str] = Field(default_factory=list, max_length=30)
+    seniority: str | None = None
     country: str | None = None
-    timezones: list[str] = Field(default_factory=list)
-    work_authorizations: list[str] = Field(default_factory=list)
-    allowed_seniority: list[str] = Field(default_factory=list)
+    timezones: list[str] = Field(default_factory=list, max_length=30)
+    work_authorizations: list[str] = Field(default_factory=list, max_length=30)
+    allowed_seniority: list[str] = Field(default_factory=list, max_length=10)
+    # Extra title words (for example "recruiter") that should always count as a match.
+    custom_title_keywords: list[str] = Field(default_factory=list, max_length=20)
     # Facts used when drafting cover letters. Only what you enter here is ever used.
     full_name: str | None = Field(default=None, max_length=200)
     headline: str | None = Field(default=None, max_length=300)

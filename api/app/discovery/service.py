@@ -1,4 +1,4 @@
-"""Find new company job boards and add the ones that hire backend/full-stack roles."""
+"""Find new company job boards and add the ones that hire for tech roles."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from app.models.company import Company
 from app.models.discovery import DiscoveryCandidate
 from app.models.event import Event
 from app.models.profile import Profile
-from app.services.job_scorer import is_target_title
-from app.services.usage import Budget, get_usage, record_usage, remaining
+from app.services.roles import is_tech_title
+from app.services.usage import Budget, get_usage, remaining, reserve_request
 
 logger = logging.getLogger("openhunt.discovery")
 
@@ -37,7 +37,7 @@ _RESERVED_SLUGS = {
     "robots.txt", "sitemap.xml", "login", "careers", "about", "privacy", "terms",
 }
 
-REASON_NO_MATCH = "no matching backend/full-stack roles"
+REASON_NO_MATCH = "no matching tech roles"
 REASON_NOT_FOUND = "board not found"
 _RETRY_NO_MATCH_AFTER = timedelta(days=30)
 _RETRY_OTHER_AFTER = timedelta(days=90)
@@ -75,8 +75,9 @@ class SearchSource:
         cursor = get_usage(db, self.name).total
         urls: list[str] = []
         for query in rotate(self.queries, cursor, allowed):
-            record_usage(db, self.name)  # count the attempt before calling out
-            db.commit()
+            if not reserve_request(db, self.name, self.budget):
+                self.errors.append(f"{self.name}: free-tier budget used up for now")
+                break
             try:
                 urls.extend(self.provider.search(query))
             except QuotaExhaustedError as error:
@@ -94,7 +95,7 @@ class BoardCheck:
 
 
 def validate_board(ats_type: str, slug: str) -> BoardCheck:
-    """Call the board's public jobs API once and look for backend/full-stack titles."""
+    """Call the board's public jobs API once and look for tech role titles."""
     company = Company(name=slug, ats_type=ats_type, ats_slug=slug)
     try:
         collector = get_collector(ats_type)
@@ -114,10 +115,10 @@ def validate_board(ats_type: str, slug: str) -> BoardCheck:
             titles.append(collector.normalize(company, payload).title)
         except CollectorError:
             continue
-    matching = [title for title in titles if is_target_title(title)]
+    matching = [title for title in titles if is_tech_title(title)]
     if not matching:
         return BoardCheck("no_match", REASON_NO_MATCH)
-    return BoardCheck("ok", f"{len(matching)} of {len(titles)} jobs are backend/full-stack")
+    return BoardCheck("ok", f"{len(matching)} of {len(titles)} jobs are tech roles")
 
 
 def extract_candidates(urls: Iterable[str]) -> dict[tuple[str, str], str]:
@@ -181,8 +182,11 @@ def _create_company(db: Session, ats_type: str, slug: str) -> Company | None:
 
 
 def default_sources(db: Session) -> list[UrlSource]:
-    profile = db.scalar(select(Profile).where(Profile.id == 1))
-    queries = build_search_queries(list(profile.target_roles) if profile else None)
+    # Boards are shared by every user, so search for the union of what users want.
+    wanted: list[str] = []
+    for roles in db.scalars(select(Profile.target_roles)).all():
+        wanted.extend(roles or [])
+    queries = build_search_queries(wanted or None)
     sources: list[UrlSource] = [
         SearchSource(provider, budget, queries, settings.discovery_max_queries_per_run)
         for provider, budget in configured_search_providers()

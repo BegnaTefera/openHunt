@@ -2,36 +2,61 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.routes.auth import login
-from app.core.security import decode_access_token, hash_password
+from app.core.auth import get_current_user, require_admin
+from app.core.security import create_access_token
 from app.models.user import User
-from app.schemas.user import UserLogin
 
 
-class FakeSession:
+class FakeDB:
     def __init__(self, user: User | None) -> None:
         self.user = user
 
-    def scalar(self, _statement: object) -> User | None:
+    def get(self, _model: object, _identifier: int) -> User | None:
         return self.user
 
 
-def test_login_returns_token_for_matching_password() -> None:
-    user = User(id=1, username="admin", password_hash=hash_password("correct-password"))
-
-    response = login(
-        UserLogin(username="admin", password="correct-password"),
-        FakeSession(user),
+def make_user(**overrides: object) -> User:
+    values = dict(
+        id=5, email="ada@example.com", password_hash="x", is_admin=False,
+        is_active=True, onboarding_completed=True, token_version=2,
     )
+    values.update(overrides)
+    return User(**values)
 
-    assert decode_access_token(response.access_token)["sub"] == "1"
+
+def credentials(token: str) -> HTTPAuthorizationCredentials:
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
 
-def test_login_rejects_invalid_password() -> None:
-    user = User(id=1, username="admin", password_hash=hash_password("correct-password"))
+def test_valid_token_returns_the_user() -> None:
+    user = make_user()
 
+    result = get_current_user(credentials(create_access_token("5", token_version=2)), FakeDB(user))
+
+    assert result is user
+
+
+@pytest.mark.parametrize(
+    ("token", "user"),
+    [
+        (None, make_user()),
+        ("garbage", make_user()),
+        (create_access_token("5", token_version=1), make_user()),  # password changed since
+        (create_access_token("5", token_version=2), make_user(is_active=False)),
+        (create_access_token("5", token_version=2), None),
+    ],
+)
+def test_bad_tokens_and_inactive_users_are_rejected(token: str | None, user: User | None) -> None:
     with pytest.raises(HTTPException) as error:
-        login(UserLogin(username="admin", password="incorrect-password"), FakeSession(user))
+        get_current_user(credentials(token) if token else None, FakeDB(user))  # type: ignore[arg-type]
 
     assert error.value.status_code == 401
+
+
+def test_admin_only_dependency() -> None:
+    assert require_admin(make_user(is_admin=True)).is_admin
+    with pytest.raises(HTTPException) as error:
+        require_admin(make_user())
+    assert error.value.status_code == 403

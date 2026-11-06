@@ -73,6 +73,17 @@ def record_usage(db: Session, provider: str, amount: int = 1, today: date | None
     db.flush()
 
 
+def reserve_request(db: Session, provider: str, budget: Budget) -> bool:
+    """Atomically reserve one provider request before calling the external API."""
+    db.execute(select(func.pg_advisory_xact_lock(func.hashtext(provider))))
+    if remaining(db, provider, budget) <= 0:
+        db.commit()
+        return False
+    record_usage(db, provider)
+    db.commit()
+    return True
+
+
 def total_requests_today(db: Session, today: date | None = None) -> int:
     return int(
         db.scalar(

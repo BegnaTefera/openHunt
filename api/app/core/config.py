@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     # provided by the environment.
     secret_key: str
     database_url: str
-    default_password: str
 
     # Non-secret settings have safe defaults so small entry points (for example
     # the scheduled collector job) only need to provide what they really use.
@@ -20,26 +19,42 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: list[str] = ["http://localhost:3000"]
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = 15
     job_fetch_interval_minutes: int = 30
     max_jobs_per_run: int = 50
     request_timeout_seconds: int = 20
     requests_per_minute: int = 20
     user_agent: str = "openHunt/0.1 (+https://example.com; contact@example.com)"
     api_timeout_seconds: int = 20
-    default_username: str = "admin"
+
+    # Accounts and sessions.
+    refresh_token_days: int = 30
+    refresh_cookie_name: str = "openhunt_refresh"
+    max_failed_logins: int = 5
+    lockout_minutes: int = 15
+    # Who may create an account. Admin privileges are provisioned separately via the CLI.
+    # List allowed addresses (comma separated) or set SIGNUP_ENABLED=false to close sign-up.
+    signup_enabled: bool = True
+    allowed_signup_emails: str = ""
+    cv_max_bytes: int = 3_000_000
 
     # Company discovery (all optional; each source is skipped when not configured).
     discovery_max_queries_per_run: int = 4
     discovery_max_validations_per_run: int = 15
-    brave_api_key: str = ""
-    brave_daily_cap: int = 20
-    brave_monthly_cap: int = 400
+    serpapi_api_key: str = ""
+    serpapi_monthly_cap: int = 250
     serper_api_key: str = ""
     serper_daily_cap: int = 20
     serper_total_cap: int = 2000
     commoncrawl_enabled: bool = True
     commoncrawl_max_urls_per_host: int = 500
+    gmail_client_id: str = ""
+    gmail_client_secret: str = ""
+    gmail_redirect_uri: str = ""
+    web_app_url: str = "http://localhost:3000"
+    gmail_poll_interval_minutes: int = 10
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
 
     # Optional free-tier AI providers (OpenAI-compatible APIs). Model names change
     # over time, so every model is configurable. The app works without any of them.
@@ -65,6 +80,16 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @property
+    def allowed_signup_email_set(self) -> set[str]:
+        return {
+            item.strip().casefold() for item in self.allowed_signup_emails.split(",") if item.strip()
+        }
+
+    @property
+    def cookie_secure(self) -> bool:
+        return self.app_env.lower() == "production"
+
     @field_validator("database_url")
     @classmethod
     def use_psycopg_driver(cls, value: str) -> str:
@@ -79,8 +104,6 @@ class Settings(BaseSettings):
         if self.app_env.lower() == "production":
             if len(self.secret_key) < 32 or "replace" in self.secret_key.lower():
                 raise ValueError("production SECRET_KEY must be a strong random value")
-            if len(self.default_password) < 12 or "replace" in self.default_password.lower():
-                raise ValueError("production DEFAULT_PASSWORD must be a strong password")
         return self
 
 

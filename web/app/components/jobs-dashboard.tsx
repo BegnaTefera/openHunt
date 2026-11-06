@@ -39,6 +39,7 @@ export default function JobsDashboard() {
   const [companyId, setCompanyId] = useState('');
   const [seniority, setSeniority] = useState('');
   const [newToday, setNewToday] = useState(false);
+  const [showExcluded, setShowExcluded] = useState(false);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
 
@@ -67,10 +68,15 @@ export default function JobsDashboard() {
     return () => { cancelled = true; };
   }, [token, source, companyId, seniority, newToday]);
 
+  // A score of 0 means a rule excluded the job (other kind of role, seniority, country...).
+  const visible = useMemo(() => (showExcluded ? jobs : jobs.filter((job) => job.score > 0)), [jobs, showExcluded]);
+  const hiddenCount = jobs.length - visible.length;
+
   const label = useMemo(() => {
-    if (!jobs.length) return 'No opportunities found';
-    return `${jobs.length} ${jobs.length === 1 ? 'opportunity' : 'opportunities'} ranked by fit`;
-  }, [jobs.length]);
+    if (!visible.length) return 'No opportunities found';
+    const base = `${visible.length} ${visible.length === 1 ? 'opportunity' : 'opportunities'} ranked by fit`;
+    return hiddenCount > 0 ? `${base} · ${hiddenCount} not eligible hidden` : base;
+  }, [visible.length, hiddenCount]);
 
   return (
     <>
@@ -80,7 +86,7 @@ export default function JobsDashboard() {
           <h1>Your opportunities</h1>
           <p className="muted">The strongest matches are ready for your review.</p>
         </div>
-        <div className="heading-quick-stat"><strong>{jobs.length}</strong><span>active matches</span></div>
+        <div className="heading-quick-stat"><strong>{visible.length}</strong><span>active matches</span></div>
       </section>
       <section className="filter-bar" aria-label="Job filters">
         <label>Source
@@ -107,13 +113,17 @@ export default function JobsDashboard() {
           <input type="checkbox" checked={newToday} onChange={(event) => setNewToday(event.target.checked)} />
           New today
         </label>
+        <label className="check-filter">
+          <input type="checkbox" checked={showExcluded} onChange={(event) => setShowExcluded(event.target.checked)} />
+          Show not-eligible
+        </label>
       </section>
       <div className="results-label">{label}</div>
       {error && <div className="notice error-message" role="alert">{error}</div>}
       {busy ? <div className="empty-state">Loading your jobs…</div> : (
         <section className="jobs-grid">
-          {jobs.map((job) => <JobCard key={job.id} job={job} />)}
-          {jobs.length === 0 && !error && (
+          {visible.map((job) => <JobCard key={job.id} job={job} />)}
+          {visible.length === 0 && !error && (
             <div className="empty-state">
               <span className="empty-icon">✳</span>
               <h2>No matches yet</h2>

@@ -23,12 +23,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db.session import SessionLocal
 from app.discovery.service import run_discovery
 from app.models.event import Event
-from worker.main import BOARD_COLLECTORS, collect_board_source, collect_configured_companies
+from worker.main import (
+    BOARD_COLLECTORS,
+    collect_board_source,
+    collect_configured_companies,
+    poll_gmail,
+    send_telegram_notifications,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("openhunt.run_once")
 
-STEPS = ("discovery", "companies", "boards")
+STEPS = ("discovery", "companies", "boards", "gmail")
 
 
 def run_discovery_once() -> None:
@@ -62,6 +68,9 @@ def run_steps(steps: list[str]) -> None:
     if "boards" in steps:
         for source in BOARD_COLLECTORS:
             collect_board_source(source)
+    if "gmail" in steps:
+        poll_gmail()
+    send_telegram_notifications()
 
 
 def main(argv: list[str] | None = None) -> int:
