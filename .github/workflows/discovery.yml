@@ -1,0 +1,41 @@
+name: Discover companies
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 6:00 AM East Africa Time (UTC+3)
+  workflow_dispatch:
+
+concurrency:
+  group: daily-discovery
+  cancel-in-progress: false
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: api
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      USER_AGENT: ${{ vars.USER_AGENT || 'openHunt/0.1 (+https://github.com; personal job search)' }}
+      SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+      SERPAPI_MONTHLY_CAP: 250
+      SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: api/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r api/requirements.txt
+
+      - name: Apply database migrations
+        working-directory: api
+        run: python -m alembic upgrade head
+
+      - name: Discover companies
+        run: python -m worker.run_once discovery

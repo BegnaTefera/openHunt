@@ -263,9 +263,11 @@ It prints one JSON result per URL with `ats_type` and `ats_slug`. Workable URLs 
 
 ### Free scheduled collection (GitHub Actions)
 
-The always-on worker is not needed in production. `.github/workflows/collect.yml` runs
-`python -m worker.run_once` every hour: it applies migrations, runs company discovery,
-collects every configured ATS board, then collects the public boards. Setup:
+The always-on worker is not needed in production. GitHub Actions runs the configured ATS
+companies, public boards, and Gmail checks hourly via `.github/workflows/collect.yml`.
+Company discovery runs separately each day at 6:00 AM East Africa Time
+(03:00 UTC) via `.github/workflows/discovery.yml`. Both workflows apply database migrations
+before running. Setup:
 
 1. Push the repository to GitHub.
 2. Under Settings, Secrets and variables, Actions, add the secret `DATABASE_URL` (your Neon URL).
@@ -274,9 +276,11 @@ collects every configured ATS board, then collects the public boards. Setup:
    attempts too. Optional secrets: `SERPER_API_KEY`, `GMAIL_CLIENT_ID`,
    `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_URI`, `TELEGRAM_BOT_TOKEN`, and
    `TELEGRAM_CHAT_ID`. Optional variables: `WEB_APP_URL` and `USER_AGENT`.
-4. Open the Actions tab, choose "Collect jobs", and press "Run workflow" to test it.
-   The action needs the same `SECRET_KEY`, Gmail credentials, and Telegram bot/chat values
-   as the API to poll connected inboxes and deliver queued alerts.
+4. Open the Actions tab, choose "Collect jobs", and press "Run workflow" to test hourly
+   collection. Choose "Discover companies" to run discovery manually. Discovery uses
+   `SERPAPI_API_KEY` and the monthly cap defaults to 250 searches; failed attempts count
+   toward the cap. The collection workflow needs the same `SECRET_KEY`, Gmail credentials,
+   and Telegram bot/chat values as the API to poll connected inboxes and deliver queued alerts.
 
 GitHub may delay scheduled runs by several minutes, and it disables scheduled workflows in
 repositories with no activity for about 60 days; re-enable it from the Actions tab if that

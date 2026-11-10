@@ -1,7 +1,7 @@
 name: Collect jobs
 
-# Free scheduled collection. This replaces the always-on worker, so nothing here
-# needs a paid host. GitHub may delay scheduled runs by several minutes.
+# Free scheduled collection. Company discovery runs separately once a day.
+# GitHub may delay scheduled runs by several minutes.
 on:
   schedule:
     - cron: "17 * * * *" # hourly, at minute 17
@@ -53,5 +53,10 @@ jobs:
         working-directory: api
         run: python -m alembic upgrade head
 
-      - name: Run collectors
+      - name: Run hourly collectors
+        if: github.event_name == 'schedule'
+        run: python -m worker.run_once companies boards gmail
+
+      - name: Run selected collectors
+        if: github.event_name == 'workflow_dispatch'
         run: python -m worker.run_once ${{ github.event.inputs.steps || 'all' }}
