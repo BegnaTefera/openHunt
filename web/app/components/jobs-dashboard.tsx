@@ -32,7 +32,8 @@ function JobCard({ job }: { job: Job }) {
 }
 
 export default function JobsDashboard() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const userId = user.id;
   const [jobs, setJobs] = useState<Job[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [source, setSource] = useState('');
@@ -59,7 +60,7 @@ export default function JobsDashboard() {
       if (!cancelled) {
         setJobs(jobRows);
         setCompanies(companyRows);
-        cacheJobPreviews(user.id, jobRows);
+        cacheJobPreviews(userId, jobRows);
       }
     }).catch((cause: unknown) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load jobs.');
@@ -67,7 +68,7 @@ export default function JobsDashboard() {
       if (!cancelled) setBusy(false);
     });
     return () => { cancelled = true; };
-  }, [token, user.id, source, companyId, seniority, newToday]);
+  }, [token, userId, source, companyId, seniority, newToday]);
 
   // A score of 0 means a rule excluded the job (other kind of role, seniority, country...).
   const visible = useMemo(() => (showExcluded ? jobs : jobs.filter((job) => job.score > 0)), [jobs, showExcluded]);

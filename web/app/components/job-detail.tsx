@@ -15,14 +15,15 @@ import DraftPanel from './draft-panel';
 
 export default function JobDetailView({ jobId }: { jobId: string }) {
   const { token, user } = useAuth();
+  const userId = user.id;
   const [job, setJob] = useState<JobDetail | null>(
-    () => getCachedJobDetail(user.id, jobId)?.job ?? null,
+    () => getCachedJobDetail(userId, jobId)?.job ?? null,
   );
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
-    const cached = getCachedJobDetail(user.id, jobId);
+    const cached = getCachedJobDetail(userId, jobId);
     if (cached) setJob(cached.job);
     if (cached?.complete && !refresh) {
       setError('');
@@ -32,11 +33,11 @@ export default function JobDetailView({ jobId }: { jobId: string }) {
       setError('');
       const loaded = await apiRequest<JobDetail>(`/jobs/${jobId}`, token);
       setJob(loaded);
-      cacheCompleteJobDetail(user.id, loaded);
+      cacheCompleteJobDetail(userId, loaded);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load this job.');
     }
-  }, [jobId, token, user.id]);
+  }, [jobId, token, userId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -56,7 +57,7 @@ export default function JobDetailView({ jobId }: { jobId: string }) {
         salary_text: job.salary_text,
       };
       setJob(next);
-      cacheCompleteJobDetail(user.id, next);
+      cacheCompleteJobDetail(userId, next);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update application status.');
     } finally {
