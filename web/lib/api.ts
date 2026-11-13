@@ -32,6 +32,66 @@ export type JobDetail = Job & {
   salary_text: string | null;
 };
 
+type CachedJobDetail = {
+  job: JobDetail;
+  complete: boolean;
+  expiresAt: number;
+};
+
+const jobDetailCache = new Map<string, CachedJobDetail>();
+const JOB_DETAIL_CACHE_TTL_MS = 30_000;
+const MAX_CACHED_JOB_DETAILS = 100;
+
+function jobDetailCacheKey(userId: number, jobId: string): string {
+  return `${userId}:${jobId}`;
+}
+
+function cacheJobDetail(userId: number, jobId: string, job: JobDetail, complete: boolean): void {
+  const key = jobDetailCacheKey(userId, jobId);
+  jobDetailCache.delete(key);
+  jobDetailCache.set(key, {
+    job,
+    complete,
+    expiresAt: Date.now() + JOB_DETAIL_CACHE_TTL_MS,
+  });
+  while (jobDetailCache.size > MAX_CACHED_JOB_DETAILS) {
+    const oldestKey = jobDetailCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    jobDetailCache.delete(oldestKey);
+  }
+}
+
+export function getCachedJobDetail(
+  userId: number,
+  jobId: string,
+): { job: JobDetail; complete: boolean } | null {
+  const key = jobDetailCacheKey(userId, jobId);
+  const cached = jobDetailCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    jobDetailCache.delete(key);
+    return null;
+  }
+  jobDetailCache.delete(key);
+  jobDetailCache.set(key, cached);
+  return { job: cached.job, complete: cached.complete };
+}
+
+export function cacheJobPreviews(userId: number, jobs: Job[]): void {
+  for (const job of jobs) {
+    cacheJobDetail(
+      userId,
+      String(job.id),
+      { ...job, employment_type: null, salary_text: null },
+      false,
+    );
+  }
+}
+
+export function cacheCompleteJobDetail(userId: number, job: JobDetail): void {
+  cacheJobDetail(userId, String(job.id), job, true);
+}
+
 export type Company = {
   id: number;
   name: string;

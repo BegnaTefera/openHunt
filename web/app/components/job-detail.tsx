@@ -2,24 +2,41 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { apiRequest, JobDetail, JobStatus } from '../../lib/api';
+import {
+  apiRequest,
+  cacheCompleteJobDetail,
+  getCachedJobDetail,
+  Job,
+  JobDetail,
+  JobStatus,
+} from '../../lib/api';
 import { useAuth } from './app-shell';
 import DraftPanel from './draft-panel';
 
 export default function JobDetailView({ jobId }: { jobId: string }) {
-  const { token } = useAuth();
-  const [job, setJob] = useState<JobDetail | null>(null);
+  const { token, user } = useAuth();
+  const [job, setJob] = useState<JobDetail | null>(
+    () => getCachedJobDetail(user.id, jobId)?.job ?? null,
+  );
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
+    const cached = getCachedJobDetail(user.id, jobId);
+    if (cached) setJob(cached.job);
+    if (cached?.complete && !refresh) {
+      setError('');
+      return;
+    }
     try {
       setError('');
-      setJob(await apiRequest<JobDetail>(`/jobs/${jobId}`, token));
+      const loaded = await apiRequest<JobDetail>(`/jobs/${jobId}`, token);
+      setJob(loaded);
+      cacheCompleteJobDetail(user.id, loaded);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load this job.');
     }
-  }, [jobId, token]);
+  }, [jobId, token, user.id]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -27,11 +44,13 @@ export default function JobDetailView({ jobId }: { jobId: string }) {
     setBusy(true);
     setError('');
     try {
-      const updated = await apiRequest<JobDetail>(`/jobs/${jobId}/status`, token, {
+      const updated = await apiRequest<Job>(`/jobs/${jobId}/status`, token, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      setJob(updated);
+      const next = { ...job, ...updated };
+      setJob(next);
+      cacheCompleteJobDetail(user.id, next);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update application status.');
     } finally {
@@ -63,7 +82,7 @@ export default function JobDetailView({ jobId }: { jobId: string }) {
             <h2>About the role</h2>
             <p className="description-text">{job.description || 'No description was provided by the source.'}</p>
           </section>
-          <DraftPanel jobId={jobId} onDrafted={() => void load()} />
+          <DraftPanel jobId={jobId} onDrafted={() => void load(true)} />
           <section className="content-panel">
             <h2>Skills and tags</h2>
             <div className="detail-tags">

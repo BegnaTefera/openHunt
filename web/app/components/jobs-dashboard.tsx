@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { apiRequest, Company, Job } from '../../lib/api';
+import { apiRequest, cacheJobPreviews, Company, Job } from '../../lib/api';
 import { useAuth } from './app-shell';
 
 const sources = [
@@ -59,6 +59,7 @@ export default function JobsDashboard() {
       if (!cancelled) {
         setJobs(jobRows);
         setCompanies(companyRows);
+        cacheJobPreviews(user.id, jobRows);
       }
     }).catch((cause: unknown) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load jobs.');
@@ -66,7 +67,7 @@ export default function JobsDashboard() {
       if (!cancelled) setBusy(false);
     });
     return () => { cancelled = true; };
-  }, [token, source, companyId, seniority, newToday]);
+  }, [token, user.id, source, companyId, seniority, newToday]);
 
   // A score of 0 means a rule excluded the job (other kind of role, seniority, country...).
   const visible = useMemo(() => (showExcluded ? jobs : jobs.filter((job) => job.score > 0)), [jobs, showExcluded]);
