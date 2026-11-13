@@ -41,6 +41,7 @@ export default function JobDetailView({ jobId }: { jobId: string }) {
   useEffect(() => { void load(); }, [load]);
 
   async function updateStatus(status: JobStatus) {
+    if (!job) return;
     setBusy(true);
     setError('');
     try {
@@ -48,7 +49,12 @@ export default function JobDetailView({ jobId }: { jobId: string }) {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      const next = { ...job, ...updated };
+      const next: JobDetail = {
+        ...job,
+        ...updated,
+        employment_type: job.employment_type,
+        salary_text: job.salary_text,
+      };
       setJob(next);
       cacheCompleteJobDetail(user.id, next);
     } catch (cause) {
